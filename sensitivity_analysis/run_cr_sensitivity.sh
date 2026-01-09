@@ -21,10 +21,15 @@ echo "Project root: $PROJECT_ROOT"
 echo "Script directory: $SCRIPT_DIR"
 echo ""
 
-# Activate conda environment
-echo "Activating conda environment..."
-conda activate "$PROJECT_ROOT/.conda"
-echo "✓ Environment activated"
+# # Activate conda environment
+# echo "Activating conda environment..."
+# conda activate "$PROJECT_ROOT/.conda"
+# echo "✓ Environment activated"
+# echo ""
+
+echo "Activating venv environment..."
+source "$PROJECT_ROOT/venv/bin/activate"
+echo "✓ Venv activated"
 echo ""
 
 # Check if initial conditions exist

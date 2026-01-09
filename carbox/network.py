@@ -15,12 +15,14 @@ class JNetwork(eqx.Module):
     incidence: jnp.array
     reactions: List[JReactionRateTerm]
     reactant_multipliers: jnp.array
+    molecularities: jnp.ndarray
 
-    def __init__(self, incidence, reactions, dense=True):
+    def __init__(self, incidence, reactions, molecularities, dense=True):
         self.incidence = incidence  # S, R
         self.reactions = reactions  # R
+        self.molecularities = molecularities
         self.reactant_multipliers = self.get_reactant_multipliers(incidence)
-
+        
     def get_reactant_multipliers(self, incidence):
         # In order to correctly get the flux, we need to multiply the rates per reaction
         # by the abundances of the reactants. This is done by getting the indices of the
@@ -82,7 +84,7 @@ class JNetwork(eqx.Module):
         """
         Multiply the rates by the abundances of the reactants.
         """
-        # We scatter the abunndances in two columns, with unity if it is monomolecular
+        # We scatter the abundances in two columns, with unity if it is monomolecular
         # This is achieved by "dropping" values we cannnot reach. Then take the product of each row, and mulitply it with the rates.
         rates_multiplier = jnp.ones_like(self.reactant_multipliers)
         rates_multiplier = jnp.prod(
@@ -97,7 +99,7 @@ class JNetwork(eqx.Module):
         time: jnp.array,
         abundances: jnp.array,
         temperature: jnp.array,
-        # density: jnp.array,
+        density: jnp.array,
         cr_rate: jnp.array,
         fuv_rate: jnp.array,
         visual_extinction: jnp.array,
@@ -110,10 +112,20 @@ class JNetwork(eqx.Module):
         # jax.debug.print("rates: {rates}", rates=rates)
         # Get the matrix that encodes the reactants that need to be multiplied to get the flux
         rates = self.multiply_rates_by_abundance(rates, abundances)
+
+        # 3. SELECTIVE SCALING
+        # If mol == 2 (Bimolecular), multiply by total density n_tot
+        # If mol == 1 (Photoreactions/CR), multiply by 1.0
+        scaling = jnp.where(self.molecularities == 2, density, 1.0)
+        scaled_rates = rates * scaling
+        # jax.debug.print("molecularities:\n{}", self.molecularities)
+        # jax.debug.print("Current Density: {d}", d=density)
+        # jax.debug.print("Scaling array (first 5): {s}", s=scaling[:5])
+        # jax.debug.print("Full Scaling Array:\n{}", scaling)
         # Calculate the change in abundances
         # TODO: check that we are not loosing too much precision with the matmul?
         # Use BCCOO to avoid conversion to dense
-        return self.incidence @ rates
+        return self.incidence @ scaled_rates
         # Regular implmentation with dense matrix and highest precision
         # return jnp.matmul(self.incidence, rates, precision=jax.lax.Precision.HIGHEST)
 
@@ -254,7 +266,7 @@ class Network:
 
     def get_ode(self):
         # Always reset the jreactions
-        self.jcreations = []
+        self.jreactions = []
 
         # Import special reaction types that should not be vectorized
         from .reactions import (
@@ -270,11 +282,13 @@ class Network:
             CIonizationReaction,
         )
 
+        molecularities = []
+        actual_reactions = [r for r in self.reactions if len(r.reactants) > 0] 
         if self.vectorize_reactions:
             reaction_groups = {}
             non_vectorizable_reactions = []
 
-            for reaction in self.reactions:
+            for reaction in actual_reactions:
                 # Skip vectorization for special photoreactions
                 if isinstance(reaction, non_vectorizable_types):
                     non_vectorizable_reactions.append(reaction)
@@ -290,19 +304,66 @@ class Network:
             }
 
             for reaction_type, grouped_reactions in reaction_groups.items():
-                # Gather parameters for vectorization
+                    
+                # 1. Identify parameters to vectorize (exclude metadata)
+                exclude_keys = {"molecularity", "reactants", "products", "reaction_type"}
+                first_reaction = grouped_reactions[0]
+                
+                # 2. Capture molecularity as a standard Python int
+                group_mol = int(first_reaction.molecularity)
+                molecularities.extend([group_mol] * len(grouped_reactions))
+
+                # 3. Gather only the chemical parameters (alpha, beta, gamma, etc.)
                 params = {
-                    key: [getattr(reaction, key) for reaction in grouped_reactions]
-                    for key in vars(grouped_reactions[0])
+                    key: [getattr(r, key) for r in grouped_reactions]
+                    for key in vars(first_reaction) if key not in exclude_keys
                 }
-                # The molecularity is infered from the number of reactants
-                del params["molecularity"]
-                vectorized_reaction = reaction_classes[reaction_type](**params)
-                self.jreactions.append(vectorized_reaction())
+
+                # 4. Create the vectorized reaction instance
+                # IMPORTANT: We pass reactants/products of the first one so the 
+                # constructor doesn't fail, but the rate logic uses the vectorized params.
+                vectorized_reaction_obj = reaction_classes[reaction_type](
+                    reaction_type=reaction_type,
+                    reactants=first_reaction.reactants,
+                    products=first_reaction.products,
+                    **params
+                )
+
+                try:
+                    self.jreactions.append(vectorized_reaction_obj())
+                except Exception as e:
+                    print(f"FAILED REACTION: {first_reaction}")
+                    raise e
+                # self.jreactions.append(vectorized_reaction_obj())
+
+                # # Gather parameters for vectorization
+                # params = {
+                #     key: [getattr(reaction, key) for reaction in grouped_reactions]
+                #     for key in vars(grouped_reactions[0])
+                # }
+
+                # # Capture the molecularity (1 or 2) before deleting from params
+                # group_mol = grouped_reactions[0].molecularity
+                # molecularities.extend([group_mol] * len(grouped_reactions))
+                
+                # # The molecularity is infered from the number of reactants
+                # del params["molecularity"]
+                # vectorized_reaction = reaction_classes[reaction_type](**params)
+                # self.jreactions.append(vectorized_reaction())
 
             # Add non-vectorizable reactions individually
             for reaction in non_vectorizable_reactions:
+
+                molecularities.append(reaction.molecularity)
+
+
                 self.jreactions.append(reaction())
         else:
             self.jreactions = [reaction() for reaction in self.reactions]
-        return JNetwork(self.incidence, self.jreactions)
+            
+            molecularities = jnp.array([r.molecularity for r in self.reactions])
+
+
+        if len(self.jreactions) == 0:
+            raise ValueError(f"Network created with 0 reactions! Check if your species/skip-lists are filtering everything out.")
+        return JNetwork(self.incidence, self.jreactions, molecularities=jnp.array(molecularities))

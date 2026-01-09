@@ -1,0 +1,29 @@
+{
+  "cr_rate": 193.06977288832496,
+  "success": true,
+  "elapsed_time": 13.012998334001168,
+  "n_species": 163,
+  "n_reactions": 2227,
+  "n_timesteps": 100,
+  "n_ode_steps": 1918,
+  "n_accepted": 1870,
+  "n_rejected": 48,
+  "final_time_years": 4999999.999999989,
+  "physical_params": {
+    "number_density": 10000.0,
+    "temperature": 250.0,
+    "cr_rate": 193.06977288832496,
+    "fuv_field": 1.0,
+    "visual_extinction": 2.9643750143703076,
+    "use_self_consistent_av": true,
+    "base_av": 2.0,
+    "cloud_radius_pc": 1.0,
+    "t_start": 0.0,
+    "t_end": 5000000.0,
+    "n_snapshots": 100,
+    "rtol": 1e-09,
+    "atol": 1e-30,
+    "solver": "kvaerno5",
+    "max_steps": 65536
+  }
+}

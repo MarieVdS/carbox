@@ -170,11 +170,11 @@ class SimulationConfig:
             "cr_rate": jnp.array(self.cr_rate),
             "fuv_field": jnp.array(self.fuv_field),
             "visual_extinction": jnp.array(visual_extinction),
-        }
+            "density": jnp.array(self.number_density)}
 
     def validate(self):
         """Basic validation of parameter ranges."""
-        assert 1e2 <= self.number_density <= 1e8, "number_density out of physical range"
+        assert 1e-1 <= self.number_density <= 1e18, "number_density out of physical range"
         assert 10 <= self.temperature <= 1e5, "temperature out of range"
         # assert 1e-18 <= self.cr_rate <= 1e-12, "cr_rate out of typical range"
         assert 0 <= self.visual_extinction, "visual_extinction out of range"

@@ -65,8 +65,6 @@ class Reaction:
 
 reactions = [Reaction(*args) for args in load_network("../data/deuterated_clean.dat")]
 
-reactions
-
 
 # +
 def extract_operations(expr):

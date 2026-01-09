@@ -21,6 +21,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+print(f"DEBUG: The value of __name__ is currently: {__name__}")
+
 # Add Carbox to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

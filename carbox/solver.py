@@ -13,6 +13,7 @@ import jax.numpy as jnp
 
 from .config import SimulationConfig
 from .network import JNetwork
+# from .physics import get_cse_physics
 
 # Seconds per year
 SPY = 3600.0 * 24 * 365.0
@@ -92,9 +93,10 @@ def solve_network(
             t,
             y,
             args["temperature"],
+            args["density"],
             args["cr_rate"],
             args["fuv_field"],
-            args["visual_extinction"],
+            args["visual_extinction"]
         )
     )
 
@@ -173,20 +175,37 @@ def compute_derivatives(
     """
     params = config.get_physical_params_jax()
 
-    dy = jnp.zeros_like(solution.ys)
+    # dy = jnp.zeros_like(solution.ys)
 
-    for i, (t, y) in enumerate(zip(solution.ts, solution.ys)):
-        dy_i = jnetwork(
+    # for i, (t, y) in enumerate(zip(solution.ts, solution.ys)):
+    #     dy_i = jnetwork(
+    #         t,
+    #         y,
+    #         params["temperature"],
+    #         params["density"],            
+    #         params["cr_rate"],
+    #         params["fuv_field"],
+    #         params["visual_extinction"],
+    #     )
+    #     dy = dy.at[i].set(dy_i)
+    # return dy
+
+    vmapped_network = jax.vmap(
+        lambda t, y: jnetwork(
             t,
             y,
             params["temperature"],
+            params["density"],
             params["cr_rate"],
             params["fuv_field"],
             params["visual_extinction"],
-        )
-        dy = dy.at[i].set(dy_i)
+        ),
+        in_axes=(0, 0) 
+    )
 
-    return dy
+    # Execute and return the result directly
+    return vmapped_network(solution.ts, solution.ys)
+
 
 
 def compute_reaction_rates(

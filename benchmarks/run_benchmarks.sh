@@ -78,17 +78,24 @@ done
 # Activate Environment
 # ============================================================
 
-if [ -d "$PROJECT_ROOT/.conda" ]; then
-    echo -e "${BLUE}Activating conda environment...${NC}"
-    eval "$(conda shell.bash hook)"
-    conda activate "$PROJECT_ROOT/.conda"
-    echo -e "${GREEN}✓ Conda environment activated${NC}"
-    echo ""
-else
-    echo -e "${YELLOW}WARNING: Conda environment not found at $PROJECT_ROOT/.conda${NC}"
-    echo -e "${YELLOW}Proceeding with system Python...${NC}"
-    echo ""
-fi
+# if [ -d "$PROJECT_ROOT/.conda" ]; then
+#     echo -e "${BLUE}Activating conda environment...${NC}"
+#     eval "$(conda shell.bash hook)"
+#     conda activate "$PROJECT_ROOT/.conda"
+#     echo -e "${GREEN}✓ Conda environment activated${NC}"
+#     echo ""
+# else
+#     echo -e "${YELLOW}WARNING: Conda environment not found at $PROJECT_ROOT/.conda${NC}"
+#     echo -e "${YELLOW}Proceeding with system Python...${NC}"
+#     echo ""
+# fi
+
+
+echo "Activating venv environment..."
+source "$PROJECT_ROOT/venv/bin/activate"
+echo "✓ Venv activated"
+echo ""
+
 
 # ============================================================
 # Banner

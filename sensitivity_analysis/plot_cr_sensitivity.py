@@ -14,12 +14,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scienceplots
+# import scienceplots
 
 # Use scienceplots for publication-quality plots
 
-plt.style.use("science")
-print("Using scienceplots styling")
+# plt.style.use("science")
+# print("Using scienceplots styling")
 
 
 plt.rcParams.update(

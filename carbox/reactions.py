@@ -52,8 +52,8 @@ class Reaction:
         self.reactants = [r for r in reactants if valid_species_check(r)]
         self.products = [p for p in products if valid_species_check(p)]
         self.reaction_type = reaction_type
-        self.molecularity = np.array(self.reactants).shape[-1]
-
+        # self.molecularity = np.array(self.reactants).shape[-1]
+        self.molecularity = len(self.reactants)
     def __str__(self):
         return f"{self.reactants} -> {self.products}"
 
