@@ -73,16 +73,16 @@ CSE_NETWORKS = {
 # Fortran model's RESOLUTION convention -- this is the standard way to
 # control snapshot density; --n-snapshots is only used if resolution is
 # explicitly disabled (--resolution none).
-DEFAULT_RESOLUTION = 0.05
+DEFAULT_RESOLUTION = 0.03
 
 # Default CSE outflow parameters (O-rich AGB wind), matching benchmarks/run.py
 DEFAULT_PHYSICS = {
     "mdot": 1.0e-5,   # Msun/yr
     "vexp": 15.0,     # km/s
     "t_star": 2000.0, # K, at r_star
-    "r_init": 1.0e14, # cm
+    "r_init": 4e13, # cm
     "r_final": 1e18,# cm (used only to derive t_end)
-    "r_star": 5.0e13, # cm
+    "r_star": 2.0e13, # cm
     "eps": 0.7,       # temperature power-law index
 }
 
