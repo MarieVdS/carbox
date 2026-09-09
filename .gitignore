@@ -1,7 +1,8 @@
 .conda
 __pycache__
-.png
-.log
+*.png
+!docs/assets/favicon.png
+*.log
 .DS_Store
 plugins
 venv/
