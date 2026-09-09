@@ -244,13 +244,80 @@ def co_self_shielding(nh2: float, nco: float) -> float:
 
 
 @partial(jax.jit, static_argnums=())
-def co_photo_diss_rate(nh2: float, nco: float, rad_field: float, av: float) -> float:
-    """CO photodissociation rate with self-shielding."""
+def co_photo_diss_rate(
+    nh2: float, nco: float, rad_field: float, av: float, base_rate: float = 2.0e-10
+) -> float:
+    """CO photodissociation rate with van Dishoeck & Black (1988) self-shielding.
+
+    ``base_rate`` is the unshielded rate [s^-1]; the shielding function is
+    normalised to 1 at zero column, so pass the network's tabulated value
+    (2.4e-10 for UMIST/Heays+ 2017) to stay consistent with the one-band
+    treatment.
+    """
     ssf = co_self_shielding(nh2, nco)
     lambda_bar = lbar(nco, nh2)
     sca = scatter(lambda_bar, av)
 
-    return 2.0e-10 * (rad_field / 1.7) * ssf * sca
+    return base_rate * (rad_field / 1.7) * ssf * sca
+
+
+# --- CO one-band self-shielding (Morris & Jura 1983) --------------------
+# The classic circumstellar-envelope treatment: a single effective
+# dissociating band, self-shielding approximated analytically for a
+# constant-velocity outflow, continuum dust shielding from Morris & Jura
+# (1983). This is the alternative to the van Dishoeck & Black (1988) 2D
+# table in co_self_shielding()/co_photo_diss_rate() above.
+_CO_OB_FRAC_LOWER = 1.0 / 3.0     # fractional population of the lower level
+_CO_OB_FOSC = 0.017              # effective dissociative oscillator strength
+_CO_OB_LAMBDA_CM = 1000.0e-8     # effective wavelength [cm]
+_CO_OB_PREFACTOR = 0.02654      # pi e^2 / (m_e c) [cm^2 s^-1]
+_CO_OB_BASE_RATE = 2.4e-10       # unshielded rate [s^-1] (UMIST/Heays+ 2017)
+# A_lambda(1000 A) / A_V (Savage & Mathis 1979, via the XLAMBDA grid above)
+CO_OB_AV_TO_UV = float(xlambda(1000.0))
+
+
+@partial(jax.jit, static_argnums=())
+def co_photo_diss_rate_oneband(
+    n_co_column: float,
+    velocity_cms: float,
+    av: float,
+    base_rate: float = _CO_OB_BASE_RATE,
+    av_to_uv: float = CO_OB_AV_TO_UV,
+) -> float:
+    """CO photodissociation, one-band self-shielding (Morris & Jura 1983).
+
+    Faithful port of the ``GETCOR`` routine used in circumstellar-envelope
+    chemistry codes:
+
+        tau_e   = (pi e^2 / m_e c) * f_lower * f_osc * lambda * N(CO) / v
+        beta_e  = (1 - exp(-1.5 tau_e)) / (1.5 tau_e)          # self-shielding
+        gamma_d = exp(-1.644 * A_1000^0.86)                    # dust continuum
+        k       = base_rate * beta_e * gamma_d
+
+    Parameters
+    ----------
+    n_co_column : radial CO column density from this radius outward [cm^-2].
+    velocity_cms : outflow expansion velocity [cm s^-1].
+    av : radial visual extinction [mag]; converted to A(1000 A) via ``av_to_uv``.
+    """
+    a_uv = jnp.clip(av, 0.0, None) * av_to_uv
+
+    tau_e = (
+        _CO_OB_PREFACTOR
+        * _CO_OB_FRAC_LOWER
+        * _CO_OB_FOSC
+        * _CO_OB_LAMBDA_CM
+        * jnp.clip(n_co_column, 0.0, None)
+        / velocity_cms
+    )
+    # (1 - e^-1.5 tau) / (1.5 tau), continuous -> 1 as tau -> 0
+    safe_tau = jnp.where(tau_e > 1e-30, tau_e, 1.0)
+    beta_e = jnp.where(
+        tau_e > 1e-30, -jnp.expm1(-1.5 * safe_tau) / (1.5 * safe_tau), 1.0
+    )
+    gamma_d = jnp.exp(-1.644 * jnp.power(a_uv, 0.86))
+
+    return base_rate * beta_e * gamma_d
 
 
 @partial(jax.jit, static_argnums=())

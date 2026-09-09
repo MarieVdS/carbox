@@ -139,6 +139,16 @@ def run_simulation(
         print(f"  Net charge: {elem_abundances['charge']:.3e}")
         print()
 
+    # Step 2b: Rewrite CO/C/H2 photo reactions to self-shielded rate terms
+    from .shielding import configure_self_shielding
+
+    configure_self_shielding(network, config)
+    if verbose and getattr(network, "_n_self_shielded", 0):
+        print(
+            f"Self-shielding: rewrote {network._n_self_shielded} photo reaction(s) "
+            f"(CO method: {getattr(network, '_co_shielding_method', config.co_shielding_method)})"
+        )
+
     # Step 3: Compile JAX network
     if verbose:
         print("Compiling JAX network...")

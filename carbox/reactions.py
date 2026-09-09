@@ -371,10 +371,25 @@ class IonPol2RateTerm(JReactionRateTerm):
         quadratic_term = self.gamma**2 * 300.0 / (10.526 * temperature)
         return self.alpha * self.beta * (1.0 + sqrt_term + quadratic_term)
 
+# Shielding column length [cm] for a photoreaction rate term.
+#
+# Static cloud: a fixed path length, cloud_radius_pc (as now).
+# CSE outflow (column_scale > 0): the radial column is taken from the
+# current radius outward, N_i = n_i * r ("plain n*r"). For CSEPhysics the
+# radial extinction obeys Av = n * r / 1.87e21 exactly, so
+# r = column_scale / Av with column_scale = mdot / (4 pi v mu m_H / 1.87e21)
+# -- recovered here from Av without needing the radius plumbed in.
+def _shielding_length_cm(column_scale, cloud_radius_pc, visual_extinction):
+    static_length = cloud_radius_pc * uclchem_photoreactions.PARSEC_TO_CM
+    cse_length = column_scale / jnp.clip(visual_extinction, 1e-30, None)
+    return jnp.where(column_scale > 0.0, cse_length, static_length)
+
+
 class H2PhotoDissRateTerm(JReactionRateTerm):
     cloud_radius_pc: jnp.ndarray
     turb_vel: jnp.ndarray
     h2_species_index: int
+    column_scale: jnp.ndarray = eqx.field(default_factory=lambda: jnp.array(0.0))
 
     def __call__(
         self,
@@ -385,9 +400,11 @@ class H2PhotoDissRateTerm(JReactionRateTerm):
         abundance_vector,
     ):
         n_h2 = abundance_vector[self.h2_species_index]
-        n_h2_column = uclchem_photoreactions.compute_column_density(n_h2, self.cloud_radius_pc)
+        length = _shielding_length_cm(
+            self.column_scale, self.cloud_radius_pc, visual_extinction
+        )
         rate = uclchem_photoreactions.h2_photo_diss_rate(
-            n_h2_column, uv_field, visual_extinction, self.turb_vel
+            n_h2 * length, uv_field, visual_extinction, self.turb_vel
         )
         return rate
 
@@ -395,6 +412,13 @@ class COPhotoDissRateTerm(JReactionRateTerm):
     cloud_radius_pc: jnp.ndarray
     h2_species_index: int
     co_species_index: int
+    column_scale: jnp.ndarray = eqx.field(default_factory=lambda: jnp.array(0.0))
+    velocity_cms: jnp.ndarray = eqx.field(default_factory=lambda: jnp.array(0.0))
+    base_rate: jnp.ndarray = eqx.field(default_factory=lambda: jnp.array(2.0e-10))
+    # "vdb": van Dishoeck & Black (1988) 2D table (default).
+    # "oneband": Morris & Jura (1983) one-band approximation (needs an
+    # outflow velocity, so CSE only).
+    method: str = eqx.field(static=True, default="vdb")
 
     def __call__(
         self,
@@ -406,12 +430,16 @@ class COPhotoDissRateTerm(JReactionRateTerm):
     ):
         n_h2 = abundance_vector[self.h2_species_index]
         n_co = abundance_vector[self.co_species_index]
+        length = _shielding_length_cm(
+            self.column_scale, self.cloud_radius_pc, visual_extinction
+        )
 
-        n_h2_column = uclchem_photoreactions.compute_column_density(n_h2, self.cloud_radius_pc)
-        n_co_column = uclchem_photoreactions.compute_column_density(n_co, self.cloud_radius_pc)
-
+        if self.method == "oneband":
+            return uclchem_photoreactions.co_photo_diss_rate_oneband(
+                n_co * length, self.velocity_cms, visual_extinction, self.base_rate
+            )
         return uclchem_photoreactions.co_photo_diss_rate(
-            n_h2_column, n_co_column, uv_field, visual_extinction
+            n_h2 * length, n_co * length, uv_field, visual_extinction, self.base_rate
         )
 
 class CIonizationRateTerm(JReactionRateTerm):
@@ -420,6 +448,7 @@ class CIonizationRateTerm(JReactionRateTerm):
     cloud_radius_pc: jnp.ndarray
     c_species_index: int
     h2_species_index: int
+    column_scale: jnp.ndarray = eqx.field(default_factory=lambda: jnp.array(0.0))
 
     def __call__(
         self,
@@ -431,16 +460,16 @@ class CIonizationRateTerm(JReactionRateTerm):
     ):
         n_c = abundance_vector[self.c_species_index]
         n_h2 = abundance_vector[self.h2_species_index]
-
-        n_c_column = uclchem_photoreactions.compute_column_density(n_c, self.cloud_radius_pc)
-        n_h2_column = uclchem_photoreactions.compute_column_density(n_h2, self.cloud_radius_pc)
+        length = _shielding_length_cm(
+            self.column_scale, self.cloud_radius_pc, visual_extinction
+        )
 
         return uclchem_photoreactions.c_ionization_rate(
             self.alpha,
             self.gamma,
             temperature,
-            n_c_column,
-            n_h2_column,
+            n_c * length,
+            n_h2 * length,
             visual_extinction,
             uv_field,
         )
@@ -724,10 +753,13 @@ class H2PhotoDissReaction(Reaction):
         self.h2_species_index = h2_species_index
 
     def _reaction_rate_factory(self, idx=None) -> JReactionRateTerm:
+        # column_scale > 0 switches the rate term to CSE radial columns
+        # (N_i = n_i * r); set by carbox.shielding.configure_self_shielding.
         return H2PhotoDissRateTerm(
             jnp.array(self.cloud_radius_pc),
             jnp.array(self.turb_vel),
             self.h2_species_index,
+            column_scale=jnp.array(getattr(self, "column_scale", 0.0)),
         )
 
 
@@ -755,10 +787,16 @@ class COPhotoDissReaction(Reaction):
         self.co_species_index = co_species_index
 
     def _reaction_rate_factory(self, idx=None) -> JReactionRateTerm:
+        # column_scale / velocity_cms / method set by
+        # carbox.shielding.configure_self_shielding (CSE runs only).
         return COPhotoDissRateTerm(
             jnp.array(self.cloud_radius_pc),
             self.h2_species_index,
             self.co_species_index,
+            column_scale=jnp.array(getattr(self, "column_scale", 0.0)),
+            velocity_cms=jnp.array(getattr(self, "velocity_cms", 0.0)),
+            base_rate=jnp.array(getattr(self, "base_rate", 2.0e-10)),
+            method=getattr(self, "co_shielding_method", "vdb"),
         )
 
 
@@ -797,4 +835,5 @@ class CIonizationReaction(Reaction):
             jnp.array(self.cloud_radius_pc),
             self.c_species_index,
             self.h2_species_index,
+            column_scale=jnp.array(getattr(self, "column_scale", 0.0)),
         )

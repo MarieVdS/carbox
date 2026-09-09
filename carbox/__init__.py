@@ -20,6 +20,13 @@ from .main import parse_network, run_simulation, solve
 from .network import JNetwork, Network
 from .parsers import parse_chemical_network
 from .physics import AbstractPhysics, CSEPhysics, StaticCloudPhysics
+from .sensitivity import (
+    initial_abundance_sensitivity,
+    rate_coefficient_sensitivity,
+    summarize_uncertainty,
+    uncertainty_budget,
+)
+from .shielding import CO_SHIELDING_METHODS, configure_self_shielding
 
 __all__ = [
     "SimulationConfig",
@@ -32,4 +39,10 @@ __all__ = [
     "AbstractPhysics",
     "StaticCloudPhysics",
     "CSEPhysics",
+    "rate_coefficient_sensitivity",
+    "initial_abundance_sensitivity",
+    "uncertainty_budget",
+    "summarize_uncertainty",
+    "configure_self_shielding",
+    "CO_SHIELDING_METHODS",
 ]

@@ -64,11 +64,12 @@ include = ["carbox"]
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-# Only lint the installable package and its tests. benchmarks/, examples/,
-# notebooks/, and sensitivity_analysis/ are auxiliary scripts with their own
-# looser conventions (exploratory imports, `import *`, ...) and haven't had
-# a lint pass yet -- bringing them in line is a separate piece of work.
-extend-exclude = ["benchmarks", "examples", "notebooks", "sensitivity_analysis"]
+# Only lint the installable package and its tests. benchmarks/, cse/,
+# examples/, notebooks/, and sensitivity_analysis/ are auxiliary scripts with
+# their own looser conventions (exploratory imports, `import *`, ...) and
+# haven't had a lint pass yet -- bringing them in line is a separate piece of
+# work.
+extend-exclude = ["benchmarks", "cse", "examples", "notebooks", "sensitivity_analysis"]
 
 [tool.ruff.lint]
 # Correctness (pyflakes, the critical pycodestyle rules) and import hygiene

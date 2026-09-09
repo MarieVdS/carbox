@@ -112,6 +112,29 @@ class SimulationConfig:
     rtol: float = 1e-12
     max_steps: int = 4096
 
+    # Self-shielding for CO / C / H2 photo reactions (see carbox.shielding).
+    # When True, run_simulation rewrites the dust-only photo rates for
+    # CO -> O + C, C -> C+ + e-, H2 -> H + H into self-shielded rate terms
+    # (radial column N_i = n_i * r). co_shielding_method picks the CO
+    # treatment: "oneband" (Morris & Jura 1983, the standard circumstellar
+    # treatment), "vdb" (van Dishoeck & Black 1988 table), or "auto" ->
+    # oneband for a CSE outflow, vdb for a static cloud (oneband needs an
+    # outflow velocity).
+    self_shielding: bool = True
+    co_shielding_method: str = "auto"
+    # Opt-in: also rewrite C photoionization / H2 photodissociation to
+    # shielded terms. Off by default -- CO is the one that matters for a CSE
+    # and UCLCHEM's C-ionization prescription is not right for every model.
+    shield_c_ionization: bool = False
+    shield_h2: bool = False
+
+    # Per-parent multiplicative uncertainty factor on the initial abundance
+    # ("believed within [x/f, x*f]"), used by carbox.sensitivity for
+    # parent-abundance error propagation. {name: factor}, with an optional
+    # "default" key for parents not listed. Typically loaded from the
+    # `uncertainties:` block of the initial-conditions YAML.
+    parent_uncertainties: Optional[Dict[str, float]] = None
+
     # Output settings
     output_dir: str = "output"
     save_abundances: bool = True
