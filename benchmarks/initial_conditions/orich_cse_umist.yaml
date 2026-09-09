@@ -24,6 +24,19 @@ abundances:
   Mg:   0.50E-08
   Na:   0.50E-08
   Fe:   0.50E-08
+# Optional: multiplicative uncertainty factor on each parent's initial
+# abundance ("believed within [x/f, x*f]"), used by carbox.sensitivity /
+# cse/run_sensitivity.py for parent-abundance error propagation. Parents not
+# listed fall back to `default`; a factor of 1.0 excludes a parent (zero
+# contribution). Delete this block to use the CLI default for every parent.
+uncertainties:
+  default: 2.0
+  H:    1.0   # bulk gas / not a real parent -- excluded
+  H2:   1.0
+  He:   1.0
+  e-:   1.0
+  H2O:  2.0
+
 metadata:
   n_species: 22
   total_abundance: 1
