@@ -35,9 +35,9 @@ Examples
     # Parent-abundance uncertainty only
     python run_sensitivity.py --network umist --species H2O --source parents
 
-    # Inspect one contributor (summary sigma stays the full-set value)
-    python run_sensitivity.py --network umist --species SiO --show-parent H2O
-    python run_sensitivity.py --network umist --species CO --show-reaction-id 8259
+The full per-contributor detail tables are always written to CSV
+(``*_sensitivity_rates.csv`` / ``*_sensitivity_parents.csv``); filter them
+afterwards to inspect one reaction or parent.
 """
 
 import argparse
@@ -95,14 +95,6 @@ def main():
              f"IC file's uncertainties block (default {DEFAULT_PARENT_UNCERTAINTY})",
     )
     sens.add_argument(
-        "--show-reaction-id", type=int, nargs="+", default=None,
-        help="Filter the rates detail table to these reactions (summary sigma is unaffected)",
-    )
-    sens.add_argument(
-        "--show-parent", nargs="+", default=None,
-        help="Filter the parents detail table to these parents (summary sigma is unaffected)",
-    )
-    sens.add_argument(
         "--min-shift", type=float, default=0.0,
         help="Drop detail rows with abs(uncertainty_shift) below this (default 0)",
     )
@@ -113,8 +105,6 @@ def main():
     source = args.pop("source")
     snapshot_index = args.pop("snapshot_index")
     parent_default = args.pop("parent_uncertainty")
-    show_reaction_id = args.pop("show_reaction_id")
-    show_parent = args.pop("show_parent")
     min_shift = args.pop("min_shift")
     top_n = args.pop("top_n")
 
@@ -150,8 +140,6 @@ def main():
         species=species,
         snapshot_index=snapshot_index,
         sources=sources,
-        reaction_ids=show_reaction_id,
-        parents=show_parent,
         parent_uncertainty_default=parent_default,
         min_abs_shift=min_shift,
     )
@@ -159,15 +147,13 @@ def main():
     if budget.rates is not None:
         path = output_dir / f"{run_name}_sensitivity_rates.csv"
         budget.rates.to_csv(path, index=False)
-        _print_ranked(budget.rates, "reactions" if show_reaction_id is None
-                      else f"reactions (filtered to {show_reaction_id})", top_n)
+        _print_ranked(budget.rates, "reactions", top_n)
         print(f"Saved rate detail ({len(budget.rates)} rows): {path}")
 
     if budget.parents is not None:
         path = output_dir / f"{run_name}_sensitivity_parents.csv"
         budget.parents.to_csv(path, index=False)
-        _print_ranked(budget.parents, "parents" if show_parent is None
-                      else f"parents (filtered to {show_parent})", top_n)
+        _print_ranked(budget.parents, "parents", top_n)
         print(f"Saved parent detail ({len(budget.parents)} rows): {path}")
 
     summary_path = output_dir / f"{run_name}_sensitivity_summary.csv"
