@@ -111,6 +111,7 @@ def build_cse_config(
     co_shielding_method: str = "oneband",
     shield_c_ionization: bool = False,
     shield_h2: bool = False,
+    physics_uncertainties: dict = None,
     save_derivatives: bool = True,
     save_rates: bool = True,
     verbose: bool = True,
@@ -186,6 +187,7 @@ def build_cse_config(
         shield_c_ionization=shield_c_ionization,
         shield_h2=shield_h2,
         parent_uncertainties=parent_uncertainties,
+        physics_uncertainties=physics_uncertainties,
         output_dir=str(output_dir),
         run_name=run_name,
         save_abundances=True,  # always includes physics columns (n, T, Av, r)

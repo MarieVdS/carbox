@@ -22,6 +22,7 @@ from .parsers import parse_chemical_network
 from .physics import AbstractPhysics, CSEPhysics, StaticCloudPhysics
 from .sensitivity import (
     initial_abundance_sensitivity,
+    physical_parameter_sensitivity,
     rate_coefficient_sensitivity,
     summarize_uncertainty,
     uncertainty_budget,
@@ -41,6 +42,7 @@ __all__ = [
     "CSEPhysics",
     "rate_coefficient_sensitivity",
     "initial_abundance_sensitivity",
+    "physical_parameter_sensitivity",
     "uncertainty_budget",
     "summarize_uncertainty",
     "configure_self_shielding",

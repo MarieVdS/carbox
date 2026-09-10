@@ -18,19 +18,26 @@ import pytest  # noqa: E402
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import dataclasses  # noqa: E402
+
+import equinox as eqx  # noqa: E402
+
 from carbox import SimulationConfig  # noqa: E402
 from carbox.initial_conditions import initialize_abundances  # noqa: E402
 from carbox.parsers import parse_chemical_network  # noqa: E402
+from carbox.physics import CSEPhysics  # noqa: E402
 from carbox.sensitivity import (  # noqa: E402
     initial_abundance_sensitivity,
+    physical_parameter_sensitivity,
     rate_coefficient_sensitivity,
     summarize_uncertainty,
     uncertainty_budget,
 )
-from carbox.solver import solve_network  # noqa: E402
+from carbox.solver import SPY, solve_network  # noqa: E402
 
 NETWORK = PROJECT_ROOT / "data" / "umist22_mini.csv"
 SPECIES = ["CO", "HCO+", "OH", "H2O"]
+PHYSICS_NAMES = ("mdot", "vexp", "t_star", "eps")
 
 
 @pytest.fixture(scope="module")
@@ -189,6 +196,180 @@ def test_uncertainty_budget_combines_sources_in_quadrature(prepared):
         expected = np.sqrt((rate_rows["uncertainty_shift"] ** 2).sum())
         got = s.loc[s["species"] == sp, "sigma_from_rates"].iloc[0]
         assert np.isclose(got, expected)
+
+
+# --------------------------------------------------------------------------
+# physical-parameter sensitivity (CSE outflow)
+# --------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def cse_prepared():
+    phys = CSEPhysics(
+        mdot=1e-5, vexp=15.0, t_star=2000.0, r_init=1e14, r_star=5e13, eps=0.7
+    )
+    r_final = 1.1e17
+    t_end_yr = (r_final - phys.r_init) / (phys.vexp * 1e5) / SPY
+    config = SimulationConfig(
+        cr_rate=1.0,
+        fuv_field=1.0,
+        t_start=0.0,
+        t_end=t_end_yr,
+        n_snapshots=25,
+        rtol=1e-10,
+        atol=1e-25,
+        solver="kvaerno5",
+        linear_solver="lu",
+        max_steps=200_000,
+        initial_abundances={"H2": 0.5, "CO": 1.5e-4, "O": 2e-4, "C": 1e-4, "e-": 0.0},
+        physics_model=phys,
+        run_name="sens_cse_test",
+    )
+    network = parse_chemical_network(str(NETWORK), "umist")
+    y0 = initialize_abundances(network, config)
+    jnetwork = network.get_ode()
+    return network, jnetwork, y0, config, phys
+
+
+def _cse_final_abundance(network, jnetwork, y0, config, phys, mult, species):
+    """Re-solve with physics field theta_l -> theta_l * mult[l], fixed r_final."""
+    phys2 = eqx.tree_at(
+        lambda ph: [getattr(ph, n) for n in PHYSICS_NAMES],
+        phys,
+        [getattr(phys, n) * mult[i] for i, n in enumerate(PHYSICS_NAMES)],
+    )
+    r_final = phys.r_init + phys.vexp * (config.t_end * SPY)
+    t_end = (r_final - phys.r_init) / (phys2.vexp * 1e5) / SPY
+    c2 = dataclasses.replace(config, physics_model=phys2, t_end=t_end)
+    sol = solve_network(jnetwork, y0, c2)
+    return float(sol.ys[-1, network.get_index(species)])
+
+
+def test_physics_sensitivity_matches_finite_difference(cse_prepared):
+    network, jnetwork, y0, config, phys = cse_prepared
+    species = ["HCO+", "H", "OH", "CO", "O+"]
+
+    df = physical_parameter_sensitivity(
+        network, jnetwork, y0, config, species=species, snapshot_index=-1
+    )
+    assert set(df["parameter"]) == set(PHYSICS_NAMES)
+    assert len(df) == len(PHYSICS_NAMES) * len(species)
+
+    top = df.reindex(
+        df["d_abundance_d_lnparam"].abs().sort_values(ascending=False).index
+    )
+    checked = 0
+    for _, row in top.head(5).iterrows():
+        k = PHYSICS_NAMES.index(row["parameter"])
+        h = 1e-3
+        plus = _cse_final_abundance(
+            network, jnetwork, y0, config, phys,
+            jnp.ones(4).at[k].set(1.0 + h), row["species"],
+        )
+        minus = _cse_final_abundance(
+            network, jnetwork, y0, config, phys,
+            jnp.ones(4).at[k].set(1.0 - h), row["species"],
+        )
+        fd = (plus - minus) / (2 * h)
+        analytic = row["d_abundance_d_lnparam"]
+        scale = max(abs(analytic), abs(fd), 1e-30)
+        assert abs(analytic - fd) / scale < 1e-3, (
+            f"{row['parameter']} / {row['species']}: "
+            f"analytic {analytic:.6e} vs FD {fd:.6e}"
+        )
+        checked += 1
+    assert checked > 0
+
+
+def test_physics_snapshot_all_has_radius_axis(cse_prepared):
+    network, jnetwork, y0, config, phys = cse_prepared
+    df = physical_parameter_sensitivity(
+        network, jnetwork, y0, config, species=["CO"], snapshot_index="all"
+    )
+    assert len(df) == len(PHYSICS_NAMES) * config.n_snapshots
+    assert df["radius_cm"].nunique() == config.n_snapshots
+
+
+def test_physics_source_quadrature_and_total(cse_prepared):
+    network, jnetwork, y0, config, phys = cse_prepared
+    species = ["HCO+", "H", "CO"]
+    factors = {"mdot": 3.0, "vexp": 1.3, "t_star": 1.2, "eps": 1.15}
+
+    budget = uncertainty_budget(
+        network, jnetwork, y0, config, species=species, snapshot_index=-1,
+        sources=("rates", "parents", "physics"),
+        physics_uncertainty=factors, parent_uncertainty_default=2.0,
+    )
+    s = budget.summary
+    assert budget.physics is not None
+    assert (s["n_physics_params"] == 4).all()
+
+    np.testing.assert_allclose(
+        s["sigma_total"],
+        np.sqrt(
+            s["sigma_from_rates"] ** 2
+            + s["sigma_from_parents"] ** 2
+            + s["sigma_from_physics"] ** 2
+        ),
+        rtol=1e-10,
+    )
+    for sp in species:
+        rows = budget.physics[budget.physics["species"] == sp]
+        expected = np.sqrt((rows["uncertainty_shift"] ** 2).sum())
+        got = s.loc[s["species"] == sp, "sigma_from_physics"].iloc[0]
+        assert np.isclose(got, expected)
+
+
+def test_physics_factor_one_contributes_nothing(cse_prepared):
+    network, jnetwork, y0, config, phys = cse_prepared
+    budget = uncertainty_budget(
+        network, jnetwork, y0, config, species=["CO", "HCO+"], snapshot_index=-1,
+        sources=("physics",), physics_uncertainty={"default": 1.0},
+    )
+    assert (budget.summary["sigma_from_physics"] == 0).all()
+    assert (budget.summary["sigma_total"] == 0).all()
+    assert budget.summary["sigma_from_rates"].isna().all()
+
+
+def test_physics_columns_absent_when_not_requested(cse_prepared):
+    network, jnetwork, y0, config, phys = cse_prepared
+    budget = uncertainty_budget(
+        network, jnetwork, y0, config, species=["CO"], snapshot_index=-1
+    )
+    assert budget.physics is None
+    assert budget.summary["sigma_from_physics"].isna().all()
+    np.testing.assert_allclose(
+        budget.summary["sigma_total"],
+        np.sqrt(
+            budget.summary["sigma_from_rates"] ** 2
+            + budget.summary["sigma_from_parents"] ** 2
+        ),
+        rtol=1e-10,
+    )
+
+
+def test_physics_detail_filter_does_not_change_summary(cse_prepared):
+    network, jnetwork, y0, config, phys = cse_prepared
+    factors = {"default": 2.0}
+    full = uncertainty_budget(
+        network, jnetwork, y0, config, species=["CO"], snapshot_index=-1,
+        sources=("physics",), physics_uncertainty=factors,
+    )
+    filtered = uncertainty_budget(
+        network, jnetwork, y0, config, species=["CO"], snapshot_index=-1,
+        sources=("physics",), physics_uncertainty=factors, physics_params=["vexp"],
+    )
+    assert set(filtered.physics["parameter"]) == {"vexp"}
+    assert set(full.physics["parameter"]) == set(PHYSICS_NAMES)
+    np.testing.assert_allclose(
+        full.summary["sigma_from_physics"], filtered.summary["sigma_from_physics"]
+    )
+
+
+def test_physics_sensitivity_rejects_static_cloud(prepared):
+    network, jnetwork, y0, config = prepared  # StaticCloudPhysics
+    with pytest.raises(ValueError, match="not defined for physics_model"):
+        physical_parameter_sensitivity(
+            network, jnetwork, y0, config, species=["CO"], snapshot_index=-1
+        )
 
 
 def test_budget_detail_filter_does_not_change_summary(prepared):

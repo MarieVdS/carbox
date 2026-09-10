@@ -178,7 +178,7 @@ instead of a time series it computes an **uncertainty budget** for the
 predicted abundances by differentiating the whole ODE solve
 (`jax.jacrev` through `solve_network`).
 
-Two independent uncertainty sources:
+Three independent uncertainty sources:
 
 1. **Rate coefficients** — `d(abundance)/d ln k_j` × `ln(uncertainty_factor_j)`.
    For UMIST, `uncertainty_factor` comes from the parsed A–E accuracy class of
@@ -187,31 +187,52 @@ Two independent uncertainty sources:
    The per-parent factor comes from the `uncertainties:` block of the
    initial-conditions YAML (see §6), or `--parent-uncertainty` for parents not
    listed there.
+3. **Physical parameters** — `d(abundance)/d ln θ` × `ln(factor_θ)` for the CSE
+   outflow parameters `mdot`, `vexp`, `t_star`, `eps`. **Opt-in:** contributes
+   only when at least one of `--mdot-uncertainty` / `--vexp-uncertainty` /
+   `--tstar-uncertainty` / `--eps-uncertainty` / `--physics-uncertainty` is set
+   (and `--source` includes `physics`, which the default `all` does).
+   `vexp` is perturbed at **fixed outer radius** — `t_end` is recomputed so the
+   outflow still ends at the same `r_final`, and (with `t_start = 0`) the
+   perturbed run lands on the same radius grid, so the derivative is
+   `∂x(r)/∂ ln vexp` at fixed radius.
 
 Per `(species, radius)` the individual shifts are quadrature-summed within
-each source, then the two sources are quadrature-summed into `sigma_total`
-and `relative_uncertainty = sigma_total / nominal_abundance`.
+each source, then the sources are quadrature-summed into `sigma_total` and
+`relative_uncertainty = sigma_total / nominal_abundance`.
 
-**Cost:** reverse-mode AD gives the gradient w.r.t. *every* reaction and
-*every* parent in one backward pass, so "both sources" costs the same as one.
-The real cost lever is the number of output components = `len(--species) ×
-n_snapshots`. Differentiating **all** species is `O(n_species)` passes — slow.
-Always pass `--species` unless you really want the whole network.
+> **Linearisation caveat.** This is a *first-order* (local) derivative.
+> It is faithful for percent-level input spreads; for a factor-of-several
+> excursion (e.g. an order-of-magnitude `mdot`, as in
+> [Van de Sande et al. 2023](https://arxiv.org/abs/2304.05924)) the true
+> response is non-linear and a model grid is the honest tool. `sigma_from_physics`
+> then tells you *which* parameter dominates and the local slope, not an exact
+> band.
+
+**Cost:** reverse-mode AD gives the gradient w.r.t. *every* reaction, *every*
+parent **and** every physical parameter in one backward pass — all three
+sources cost the same as one. The real cost lever is the number of output
+components = `len(--species) × n_snapshots`. Differentiating **all** species is
+`O(n_species)` passes — slow. Always pass `--species` unless you really want the
+whole network.
 
 ### Basic run
 
 ```bash
 cd cse
-../.conda/bin/python run_sensitivity.py --network umist --species H2O SiO HCN CO
+../.conda/bin/python run_sensitivity.py --network umist --species H2O SiO HCN CO \
+    --mdot-uncertainty 3 --vexp-uncertainty 1.3 --eps-uncertainty 1.2
 ```
 
 Writes to `cse/results/`:
 
 ```
 cse_umist_sensitivity_summary.csv   # one row per (species, snapshot): nominal, sigma_from_rates,
-                                    #   sigma_from_parents, sigma_total, worst_case_*, relative_uncertainty
+                                    #   sigma_from_parents, sigma_from_physics, sigma_total,
+                                    #   worst_case_*, n_*, relative_uncertainty
 cse_umist_sensitivity_rates.csv     # detail: contribution of each reaction to each species' error bar
 cse_umist_sensitivity_parents.csv   # detail: contribution of each parent to each species' error bar
+cse_umist_sensitivity_physics.csv   # detail: d(abundance)/d ln θ and shift for mdot/vexp/t_star/eps
 ```
 
 and prints the ranked top contributors + the summary table.
@@ -219,29 +240,38 @@ and prints the ranked top contributors + the summary table.
 ### vs radius (one solve, every snapshot)
 
 ```bash
-../.conda/bin/python run_sensitivity.py --network umist --species H2O SiO --snapshot-index all
+../.conda/bin/python run_sensitivity.py --network umist --species H2O SiO --snapshot-index all \
+    --physics-uncertainty 2
 ```
+
+`sigma_from_physics` vs radius is the interesting output here — the physical
+parameters mostly matter through the density profile, so their weight grows
+outward.
 
 ### One source only
 
 ```bash
 ../.conda/bin/python run_sensitivity.py --network umist --species H2O --source parents
 ../.conda/bin/python run_sensitivity.py --network umist --species H2O --source rates
+../.conda/bin/python run_sensitivity.py --network umist --species H2O CO --source physics \
+    --physics-uncertainty 2
 ```
 
 ### Inspect a single contributor
 
-The full per-contributor detail tables (`*_sensitivity_rates.csv` /
-`*_sensitivity_parents.csv`) are **always written in full** — one solve gives
-you the derivative w.r.t. every reaction and every parent, so there is nothing
-to gain by discarding rows before saving. To look at one reaction or parent,
-filter the CSV afterwards, e.g.:
+The full per-contributor detail tables (`*_sensitivity_{rates,parents,physics}.csv`)
+are **always written in full** — one solve gives you the derivative w.r.t.
+every reaction, parent and parameter, so there is nothing to gain by discarding
+rows before saving. To look at one contributor, filter the CSV afterwards, e.g.:
 
 ```python
 import pandas as pd
 rates = pd.read_csv("cse/results/cse_umist_sensitivity_rates.csv")
 rates[rates.reaction_id == 8259]                     # one reaction
 rates[rates.species == "SiO"].nlargest(10, "uncertainty_shift", keep="all")
+
+phys = pd.read_csv("cse/results/cse_umist_sensitivity_physics.csv")
+phys[phys.parameter == "mdot"]                       # mdot's effect on every species
 ```
 
 The terminal print-out already shows the top `--top-n` contributors ranked by
@@ -258,13 +288,21 @@ save_rates=False`), **plus** the group below.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--species [S ...]` | all species | Species to report. **Cost scales with this count** — always set it. Space-separated, e.g. `--species H2O SiO HCN`. |
-| `--source {rates,parents,both}` | `both` | Which uncertainty source(s) to propagate. `both` is free relative to one. |
+| `--source {rates,parents,physics,both,all}` | `all` | Which uncertainty source(s) to propagate. `all` = rates + parents + physics; `both` = rates + parents (legacy). All sources are free relative to one. |
 | `--snapshot-index N` | `-1` | Which snapshot to evaluate at. `-1` = last (outermost radius). Any integer indexes the log-radius grid. `all` = every snapshot (uncertainty vs radius from one solve). |
 | `--parent-uncertainty F` | `1.5` | Default multiplicative factor for parents **without** an entry in the IC file's `uncertainties:` block ("believed within `[x/F, x*F]`"). The IC file's `default:` key, if present, overrides this. |
+| `--mdot-uncertainty F` | *(unset)* | Multiplicative factor on `mdot` (`[mdot/F, mdot·F]`). Unset ⇒ falls back to `--physics-uncertainty`. |
+| `--vexp-uncertainty F` | *(unset)* | Factor on `vexp`. Perturbed at fixed outer radius (`t_end` recomputed). |
+| `--tstar-uncertainty F` | *(unset)* | Factor on `t_star` (temperature at `r_star`). |
+| `--eps-uncertainty F` | *(unset)* | Factor on `eps`, the `T ∝ r^-eps` exponent. `F = 1.15` ≈ `eps ∈ [0.61, 0.81]` for `eps₀ = 0.7`. |
+| `--physics-uncertainty F` | `1.0` | Shared default factor for any physics parameter not set individually. `1.0` = no uncertainty. Set this alone to give all four the same spread. |
 | `--min-shift X` | `0.0` | Drop detail-table rows with `abs(uncertainty_shift) < X` before writing the CSV. A size cap for huge networks only — leave at `0` to keep the complete table. Summary unaffected. |
 | `--top-n N` | `20` | How many ranked detail rows to print to the terminal (does not affect the CSVs). |
 
-Same top-level `--output` / `--run-name` / `--network` as `run_cse.py`.
+Same top-level `--output` / `--run-name` / `--network` as `run_cse.py`. The physics
+factors can also be set in code / a config YAML via
+`SimulationConfig.physics_uncertainties` (a `{name: factor}` dict with an optional
+`"default"` key), the same way `parent_uncertainties` mirrors the IC-file block.
 
 ---
 
@@ -335,11 +373,18 @@ For the uncertainty budget directly:
 from carbox.sensitivity import uncertainty_budget
 budget = uncertainty_budget(network, jnetwork, y0, config,
                             species=["H2O", "SiO"], snapshot_index="all",
-                            sources=("rates", "parents"))
+                            sources=("rates", "parents", "physics"),
+                            physics_uncertainty={"mdot": 3.0, "vexp": 1.3,
+                                                 "t_star": 1.2, "eps": 1.15})
 budget.summary      # DataFrame
 budget.rates        # per-reaction detail
 budget.parents      # per-parent detail
+budget.physics      # per-parameter detail (mdot / vexp / t_star / eps)
 ```
+
+`carbox.sensitivity.physical_parameter_sensitivity(...)` returns the physics
+detail table on its own, mirroring `rate_coefficient_sensitivity` /
+`initial_abundance_sensitivity`.
 
 See `carbox/main.py` (`parse_network` / `solve`) for reusing one compiled
 network across many solves with different `rate_modifiers`.

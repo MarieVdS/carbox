@@ -3,31 +3,39 @@
 Uncertainty budget for a CSE run's predicted abundances.
 
 Differentiates the whole ODE solve (``jax.jacrev`` through ``solve_network``)
-with respect to two independent uncertainty sources and combines each
+with respect to three independent uncertainty sources and combines each
 derivative with the assumed input spread:
 
 - **rate coefficients** -- ``d(abundance)/d ln k_j`` x ``ln(uncertainty_factor_j)``
   (for UMIST, the A-E accuracy class);
 - **parent abundances** -- ``d(abundance)/d ln x_k(0)`` x ``ln(factor_k)``
   (from the ``uncertainties:`` block of the initial-conditions YAML, or
-  ``--parent-uncertainty``).
+  ``--parent-uncertainty``);
+- **physical parameters** -- ``d(abundance)/d ln theta`` x ``ln(factor_theta)``
+  for the CSE outflow parameters ``mdot`` / ``vexp`` / ``t_star`` / ``eps``
+  (from ``--mdot-uncertainty`` / ``--vexp-uncertainty`` / ``--tstar-uncertainty``
+  / ``--eps-uncertainty``, or ``--physics-uncertainty`` as the shared default).
+  ``vexp`` is perturbed at fixed outer radius (``t_end`` is recomputed).
 
-Per (species, radius) the shifts are quadrature-summed within each source
-and the two sources are quadrature-summed into ``sigma_total`` /
-``relative_uncertainty``.
+Per (species, radius) the shifts are quadrature-summed within each source and
+the sources are quadrature-summed into ``sigma_total`` /
+``relative_uncertainty``. This is a first-order (local) linearisation --
+faithful for percent-level spreads, only approximate for a factor-of-several
+``mdot`` (where a model grid is the honest tool).
 
 The outflow setup is exactly the one ``run_cse.py`` uses; the same
 ``--network`` / ``--mdot`` / ... flags apply.
 
-Cost: reverse-mode AD gives the gradient w.r.t. every reaction AND every
-parent in one pass, so both sources together cost the same as one. The
-levers are ``--species`` (cost ~ number of species) and ``--snapshot-index``
-(``all`` keeps every radius).
+Cost: reverse-mode AD gives the gradient w.r.t. every reaction, every parent
+AND every physical parameter in one pass -- all three sources together cost
+the same as one. The levers are ``--species`` (cost ~ number of species) and
+``--snapshot-index`` (``all`` keeps every radius).
 
 Examples
 --------
-    # Both sources, a few species, final radius
-    python run_sensitivity.py --network umist --species H2O SiO HCN CO
+    # All three sources, a few species, final radius
+    python run_sensitivity.py --network umist --species H2O SiO HCN CO \
+        --mdot-uncertainty 3 --vexp-uncertainty 1.3 --eps-uncertainty 1.2
 
     # vs radius, from one solve
     python run_sensitivity.py --network umist --species H2O SiO --snapshot-index all
@@ -35,9 +43,13 @@ Examples
     # Parent-abundance uncertainty only
     python run_sensitivity.py --network umist --species H2O --source parents
 
+    # Physical parameters only, one shared factor
+    python run_sensitivity.py --network umist --species H2O CO --source physics \
+        --physics-uncertainty 2
+
 The full per-contributor detail tables are always written to CSV
-(``*_sensitivity_rates.csv`` / ``*_sensitivity_parents.csv``); filter them
-afterwards to inspect one reaction or parent.
+(``*_sensitivity_{rates,parents,physics}.csv``); filter them afterwards to
+inspect one reaction / parent / parameter.
 """
 
 import argparse
@@ -46,7 +58,11 @@ import pandas as pd
 
 from carbox.initial_conditions import initialize_abundances
 from carbox.parsers import parse_chemical_network
-from carbox.sensitivity import DEFAULT_PARENT_UNCERTAINTY, uncertainty_budget
+from carbox.sensitivity import (
+    DEFAULT_PARENT_UNCERTAINTY,
+    DEFAULT_PHYSICS_UNCERTAINTY,
+    uncertainty_budget,
+)
 from carbox.shielding import configure_self_shielding
 
 from run_cse import add_common_cse_args, build_cse_config
@@ -82,8 +98,10 @@ def main():
         help="Species to report (default: all -- cost scales with this count)",
     )
     sens.add_argument(
-        "--source", choices=["rates", "parents", "both"], default="both",
-        help="Uncertainty source(s) to propagate (default: both)",
+        "--source", choices=["rates", "parents", "physics", "both", "all"],
+        default="all",
+        help="Uncertainty source(s) to propagate: 'all' (default) = rates + "
+             "parents + physics; 'both' = rates + parents (legacy)",
     )
     sens.add_argument(
         "--snapshot-index", type=_snapshot_index, default=-1,
@@ -100,6 +118,21 @@ def main():
     )
     sens.add_argument("--top-n", type=int, default=20, help="Detail rows to print")
 
+    phys = parser.add_argument_group("Physical-parameter uncertainty")
+    phys.add_argument("--mdot-uncertainty", type=float, default=None,
+                      help="Multiplicative factor F on mdot ([mdot/F, mdot*F])")
+    phys.add_argument("--vexp-uncertainty", type=float, default=None,
+                      help="Multiplicative factor F on vexp (fixed outer radius)")
+    phys.add_argument("--tstar-uncertainty", type=float, default=None,
+                      help="Multiplicative factor F on t_star")
+    phys.add_argument("--eps-uncertainty", type=float, default=None,
+                      help="Multiplicative factor F on the T power-law exponent eps")
+    phys.add_argument(
+        "--physics-uncertainty", type=float, default=DEFAULT_PHYSICS_UNCERTAINTY,
+        help="Shared default factor for any physics parameter not set individually "
+             f"(default {DEFAULT_PHYSICS_UNCERTAINTY} = no uncertainty)",
+    )
+
     args = vars(parser.parse_args())
     species = args.pop("species")
     source = args.pop("source")
@@ -108,7 +141,27 @@ def main():
     min_shift = args.pop("min_shift")
     top_n = args.pop("top_n")
 
-    sources = ("rates", "parents") if source == "both" else (source,)
+    physics_default = args.pop("physics_uncertainty")
+    physics_uncertainties = {"default": physics_default}
+    for flag, name in (
+        ("mdot_uncertainty", "mdot"), ("vexp_uncertainty", "vexp"),
+        ("tstar_uncertainty", "t_star"), ("eps_uncertainty", "eps"),
+    ):
+        value = args.pop(flag)
+        if value is not None:
+            physics_uncertainties[name] = value
+
+    sources = {
+        "both": ("rates", "parents"),
+        "all": ("rates", "parents", "physics"),
+    }.get(source, (source,))
+
+    if "physics" in sources and set(physics_uncertainties) == {"default"} \
+            and physics_default == 1.0:
+        print(
+            "Note: physics source requested but no --*-uncertainty / "
+            "--physics-uncertainty given -> sigma_from_physics will be 0."
+        )
 
     if species is None:
         print(
@@ -117,7 +170,8 @@ def main():
         )
 
     input_file, format_type, run_name, output_dir, config = build_cse_config(
-        save_derivatives=False, save_rates=False, **args
+        save_derivatives=False, save_rates=False,
+        physics_uncertainties=physics_uncertainties, **args
     )
 
     network = parse_chemical_network(str(input_file), format_type)
@@ -156,12 +210,17 @@ def main():
         _print_ranked(budget.parents, "parents", top_n)
         print(f"Saved parent detail ({len(budget.parents)} rows): {path}")
 
+    if budget.physics is not None:
+        path = output_dir / f"{run_name}_sensitivity_physics.csv"
+        budget.physics.to_csv(path, index=False)
+        _print_ranked(budget.physics, "physical parameters", top_n)
+        print(f"Saved physics detail ({len(budget.physics)} rows): {path}")
+
     summary_path = output_dir / f"{run_name}_sensitivity_summary.csv"
     budget.summary.to_csv(summary_path, index=False)
     print(
-        "\nPer-species error bar "
-        "(quadrature over ALL reactions / ALL parents; sigma_total = "
-        "sqrt(rates^2 + parents^2)):"
+        "\nPer-species error bar (quadrature over ALL reactions / ALL parents / "
+        "ALL physics params; sigma_total = sqrt(rates^2 + parents^2 + physics^2)):"
     )
     with pd.option_context("display.max_rows", len(budget.summary), "display.width", 200):
         print(budget.summary.to_string(index=False))

@@ -135,6 +135,13 @@ class SimulationConfig:
     # `uncertainties:` block of the initial-conditions YAML.
     parent_uncertainties: Optional[Dict[str, float]] = None
 
+    # Per-parameter multiplicative uncertainty factor on the physics-model
+    # parameters ("believed within [x/f, x*f]"), used by carbox.sensitivity for
+    # physical-parameter error propagation. For a CSE run the parameters are
+    # mdot / vexp / t_star / eps; {name: factor} with an optional "default" key
+    # for parameters not listed (default factor 1.0 = no uncertainty).
+    physics_uncertainties: Optional[Dict[str, float]] = None
+
     # Output settings
     output_dir: str = "output"
     save_abundances: bool = True
