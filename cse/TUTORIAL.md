@@ -45,7 +45,7 @@ The physics comes from `CSEPhysics` (`carbox/physics.py`): a constant-velocity s
 `t_end` is **not** a direct input. It is computed from how long the wind takes to expand from `r_init` to `r_final` at `vexp`:
 
 ```
-t_end [yr] = (r_final - r_init) / (vexp * 1e5) / seconds_per_year
+t_end [yr] = (r_final - r_init) / vexp / seconds_per_year      # vexp in cm/s
 ```
 
 So you control the integration span with `--r-init` / `--r-final` / `--vexp`, not with a time.
@@ -64,7 +64,7 @@ cd cse
 ```
 
 This uses the full UMIST22 network with the default O-rich AGB wind
-(`Mdot = 1e-5 Msun/yr`, `vexp = 15 km/s`, `r_init = 1e14 cm`,
+(`Mdot = 1e-5 Msun/yr`, `vexp = 1.5e6 cm/s` = 15 km/s, `r_init = 1e14 cm`,
 `r_final = 1.1e17 cm`, `t_star = 2000 K`, `eps = 0.7`), CO self-shielding via
 the Morris & Jura one-band approximation, 100 snapshots.
 
@@ -85,7 +85,7 @@ cse/results/cse_umist_summary.txt        # human-readable summary
 ../.conda/bin/python run_cse.py \
   --network umist \
   --run-name orich_slow_wind \
-  --mdot 5e-6 --vexp 10 --t-star 2500 --eps 0.65 \
+  --mdot 5e-6 --vexp 1.0e6 --t-star 2500 --eps 0.65 \
   --r-init 1e14 --r-final 5e17 \
   --cr-rate 1.0 --fuv-field 1.0 \
   --co-shielding oneband \
@@ -120,7 +120,7 @@ Run `../.conda/bin/python run_cse.py --help` for the canonical list. Explanation
 | Flag | Default | Units | Meaning |
 | --- | --- | --- | --- |
 | `--mdot` | `1e-5` | Msun/yr | Mass-loss rate. Sets the density normalisation (`n ~ Mdot / r^2 vexp`). |
-| `--vexp` | `15.0` | km/s | Expansion velocity. Enters density, the `r(t)` mapping, **and** `t_end`, and is required by the one-band CO shielding. |
+| `--vexp` | `1.5e6` | cm/s | Expansion velocity (= 15 km/s). Enters density, the `r(t)` mapping, **and** `t_end`, and is required by the one-band CO shielding. |
 | `--t-star` | `2000.0` | K | Temperature at `r_star` — the normalisation of the `T ~ r^-eps` profile. |
 | `--r-init` | `1e14` | cm | Inner radius: where the integration starts. |
 | `--r-final` | `1.1e17` | cm | Outer radius: sets `t_end` (see §1). Not a `CSEPhysics` field. |
@@ -358,7 +358,7 @@ from run_cse import build_cse_config, run_cse
 
 # just build the config (no solve) — e.g. to reuse a compiled network across a sweep
 input_file, fmt, run_name, out_dir, config = build_cse_config(
-    network="umist", mdot=5e-6, vexp=10.0, r_final=5e17, n_snapshots=200,
+    network="umist", mdot=5e-6, vexp=1.0e6, r_final=5e17, n_snapshots=200,
 )
 
 # or build + solve + write output in one call

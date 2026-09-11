@@ -204,10 +204,10 @@ def test_uncertainty_budget_combines_sources_in_quadrature(prepared):
 @pytest.fixture(scope="module")
 def cse_prepared():
     phys = CSEPhysics(
-        mdot=1e-5, vexp=15.0, t_star=2000.0, r_init=1e14, r_star=5e13, eps=0.7
+        mdot=1e-5, vexp=15.0e5, t_star=2000.0, r_init=1e14, r_star=5e13, eps=0.7
     )
     r_final = 1.1e17
-    t_end_yr = (r_final - phys.r_init) / (phys.vexp * 1e5) / SPY
+    t_end_yr = (r_final - phys.r_init) / phys.vexp / SPY
     config = SimulationConfig(
         cr_rate=1.0,
         fuv_field=1.0,
@@ -237,7 +237,7 @@ def _cse_final_abundance(network, jnetwork, y0, config, phys, mult, species):
         [getattr(phys, n) * mult[i] for i, n in enumerate(PHYSICS_NAMES)],
     )
     r_final = phys.r_init + phys.vexp * (config.t_end * SPY)
-    t_end = (r_final - phys.r_init) / (phys2.vexp * 1e5) / SPY
+    t_end = (r_final - phys.r_init) / phys2.vexp / SPY
     c2 = dataclasses.replace(config, physics_model=phys2, t_end=t_end)
     sol = solve_network(jnetwork, y0, c2)
     return float(sol.ys[-1, network.get_index(species)])
@@ -362,6 +362,35 @@ def test_physics_detail_filter_does_not_change_summary(cse_prepared):
     np.testing.assert_allclose(
         full.summary["sigma_from_physics"], filtered.summary["sigma_from_physics"]
     )
+
+
+def test_physics_source_does_not_perturb_the_nominal_solve(cse_prepared):
+    """Regression test for a unit bug: requesting the "physics" source (even
+    with no uncertainty, i.e. p=1) must reproduce the same nominal trajectory
+    as an independent, un-wrapped solve_network call -- not a shorter/longer
+    integration from a botched vexp-unit conversion in t_end recompute.
+
+    This check must NOT share any formula with
+    carbox.sensitivity._apply_physics_multipliers -- it re-solves directly,
+    so it cannot hide the same bug the way an internally-consistent
+    finite-difference check can.
+    """
+    network, jnetwork, y0, config, phys = cse_prepared
+    species = ["OH", "H2O", "O+", "HCO+", "CO"]
+    species_idx = [network.get_index(sp) for sp in species]
+
+    reference = solve_network(jnetwork, y0, config)
+    reference_ys = np.asarray(reference.ys)[:, species_idx]
+
+    budget = uncertainty_budget(
+        network, jnetwork, y0, config, species=species, snapshot_index="all",
+        sources=("rates", "parents", "physics"),
+        physics_uncertainty={"default": 2.0},
+    )
+    s = budget.summary.pivot(index="radius_cm", columns="species", values="nominal_abundance")
+    nominal_ys = s[species].to_numpy()
+
+    np.testing.assert_allclose(nominal_ys, reference_ys, rtol=1e-6, atol=1e-28)
 
 
 def test_physics_sensitivity_rejects_static_cloud(prepared):

@@ -100,7 +100,7 @@ NETWORK_CONFIGS = {
         "physics": {
             "type": "cse",
             "mdot": 1.0e-5,
-            "vexp": 15.0,
+            "vexp": 1.5e6,  # cm/s (= 15 km/s)
             "t_star": 2000.0,
             "r_init": 1.0e16,
             "r_final": 1.1e17,
@@ -126,7 +126,7 @@ NETWORK_CONFIGS = {
         "physics": {
             "type": "cse",
             "mdot": 1.0e-5,
-            "vexp": 15.0,
+            "vexp": 1.5e6,  # cm/s (= 15 km/s)
             "t_star": 2000.0,
             "r_init": 1.0e16,
             "r_final": 1.1e17,
@@ -152,7 +152,7 @@ NETWORK_CONFIGS = {
         "physics": {
             "type": "cse",
             "mdot": 1.0e-5,
-            "vexp": 15.0,
+            "vexp": 1.5e6,  # cm/s (= 15 km/s)
             "t_star": 2000.0,
             "r_init": 1.0e16,
             "r_final": 1.1e17,
@@ -197,7 +197,7 @@ def resolve_time_range(physics_spec: dict, solver_spec: dict) -> tuple:
         return t_start, solver_spec["t_end"]
 
     if physics_spec["type"] == "cse" and "r_final" in physics_spec:
-        v_cgs = physics_spec["vexp"] * 1.0e5
+        v_cgs = physics_spec["vexp"]  # already cm/s (CSEPhysics convention)
         t_end_sec = (physics_spec["r_final"] - physics_spec["r_init"]) / v_cgs
         return t_start, t_end_sec / SPY
 

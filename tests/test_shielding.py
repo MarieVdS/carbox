@@ -35,9 +35,9 @@ IC = {"H2": 0.5, "CO": 1.5e-4, "O": 2.0e-4, "C": 1.0e-4, "e-": 1.0e-8}
 
 def _cse_config(**overrides):
     physics = CSEPhysics(
-        mdot=1e-5, vexp=15.0, t_star=2000.0, r_init=1e16, r_star=5e13, eps=0.7
+        mdot=1e-5, vexp=15.0e5, t_star=2000.0, r_init=1e16, r_star=5e13, eps=0.7
     )
-    t_end = (1.1e17 - physics.r_init) / (physics.vexp * 1e5) / 3.15576e7
+    t_end = (1.1e17 - physics.r_init) / physics.vexp / 3.15576e7
     kw = dict(
         cr_rate=1.0,
         fuv_field=1.0,

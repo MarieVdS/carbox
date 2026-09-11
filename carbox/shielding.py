@@ -58,7 +58,7 @@ def _cse_geometry(physics: CSEPhysics):
     ``n = mdot / (4 pi r^2 v mu m_H)``.
     """
     mdot_cgs = physics.mdot * physics.MSUN_G / physics.YR_S
-    v_cgs = physics.vexp * physics.KM_CM
+    v_cgs = physics.vexp
     column_scale = mdot_cgs / (4.0 * math.pi * v_cgs * physics.MU * physics.MH * _NH_PER_AV)
     return column_scale, v_cgs
 

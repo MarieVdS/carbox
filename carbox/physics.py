@@ -125,7 +125,7 @@ class CSEPhysics(AbstractPhysics):
     """
 
     mdot: float       # Mass loss rate [M_sun/yr]
-    vexp: float       # Expansion velocity [km/s]
+    vexp: float       # Expansion velocity [cm/s]
     t_star: float     # Stellar effective temperature (at r_star) [K]
     r_init: float     # Initial radius [cm]
     r_star: float     # Stellar radius, normalization of the temperature profile [cm]
@@ -143,7 +143,7 @@ class CSEPhysics(AbstractPhysics):
 
     def get_conditions(self, t_sec):
         # Current radius: r = r_init + v * t
-        v_cgs = self.vexp * self.KM_CM
+        v_cgs = self.vexp
         r = self.r_init + v_cgs * jnp.asarray(t_sec)
 
         # Density profile (n ~ r^-2): n = Mdot / (4 pi r^2 v mu mH)
@@ -167,7 +167,7 @@ class CSEPhysics(AbstractPhysics):
 
     def time_grid(self, config):
         """Log-spaced radius grid mapped back to time (avoids clustering at t=0)."""
-        v_cgs = self.vexp * self.KM_CM
+        v_cgs = self.vexp
         t_start_sec = config.t_start * SPY
         t_end_sec = config.t_end * SPY
 

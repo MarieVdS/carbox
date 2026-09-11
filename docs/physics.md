@@ -45,7 +45,7 @@ from carbox.physics import CSEPhysics
 
 physics = CSEPhysics(
     mdot=1e-5,      # mass-loss rate, M_sun/yr
-    vexp=15.0,      # expansion velocity, km/s
+    vexp=1.5e6,     # expansion velocity, cm/s (= 15 km/s)
     t_star=2000.0,  # temperature at r_star, K
     r_init=1e16,    # starting radius, cm
     r_star=5e13,    # stellar radius, cm

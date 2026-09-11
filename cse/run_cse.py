@@ -15,7 +15,7 @@ sensitivity analysis runs on an identical outflow setup.
 Examples
 --------
     python run_cse.py --network umist
-    python run_cse.py --network umist_mini --mdot 5e-6 --vexp 10
+    python run_cse.py --network umist_mini --mdot 5e-6 --vexp 1.0e6
     python run_cse.py --network umist --r-final 5e17 --n-snapshots 200
 """
 
@@ -62,7 +62,7 @@ CSE_NETWORKS = {
 # Default CSE outflow parameters (O-rich AGB wind).
 DEFAULT_PHYSICS = {
     "mdot": 1.0e-5,    # Mass-loss rate [Msun/yr]
-    "vexp": 15.0,      # Expansion velocity [km/s]
+    "vexp": 1.5e6,     # Expansion velocity [cm/s] (= 15 km/s)
     "t_star": 2000.0,  # Temperature at r_star [K]
     "r_init": 1.0e14,  # Initial radius [cm]
     "r_final": 1.1e17,  # Final radius [cm] (sets t_end, not a CSEPhysics field)
@@ -83,8 +83,8 @@ DEFAULT_SOLVER = {
 
 
 def resolve_t_end_years(r_init: float, r_final: float, vexp: float) -> float:
-    """Years to expand from ``r_init`` to ``r_final`` at constant ``vexp``."""
-    return (r_final - r_init) / (vexp * 1.0e5) / SPY
+    """Years to expand from ``r_init`` to ``r_final`` at constant ``vexp`` [cm/s]."""
+    return (r_final - r_init) / vexp / SPY
 
 
 def build_cse_config(
@@ -162,8 +162,8 @@ def build_cse_config(
         print("=" * 70)
         print(f"Network: {input_file}")
         print(
-            f"Outflow: mdot={mdot:.2e} Msun/yr, vexp={vexp:.1f} km/s, "
-            f"r_init={r_init:.2e} -> r_final={r_final:.2e} cm"
+            f"Outflow: mdot={mdot:.2e} Msun/yr, vexp={vexp:.3e} cm/s "
+            f"({vexp / 1.0e5:.1f} km/s), r_init={r_init:.2e} -> r_final={r_final:.2e} cm"
         )
         print(
             f"At r_init: n={float(n0):.3e} cm^-3, T={float(t0):.1f} K, Av={float(av0):.2f} mag"
@@ -230,7 +230,7 @@ def add_common_cse_args(parser: argparse.ArgumentParser) -> None:
 
     phys = parser.add_argument_group("CSE outflow physics")
     phys.add_argument("--mdot", type=float, default=DEFAULT_PHYSICS["mdot"], help="Mass-loss rate [Msun/yr]")
-    phys.add_argument("--vexp", type=float, default=DEFAULT_PHYSICS["vexp"], help="Expansion velocity [km/s]")
+    phys.add_argument("--vexp", type=float, default=DEFAULT_PHYSICS["vexp"], help="Expansion velocity [cm/s]")
     phys.add_argument("--t-star", type=float, default=DEFAULT_PHYSICS["t_star"], help="Temperature at r_star [K]")
     phys.add_argument("--r-init", type=float, default=DEFAULT_PHYSICS["r_init"], help="Initial radius [cm]")
     phys.add_argument("--r-final", type=float, default=DEFAULT_PHYSICS["r_final"], help="Final radius [cm] (sets t_end)")

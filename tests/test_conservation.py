@@ -25,7 +25,7 @@ SPY = 3600.0 * 24 * 365.0
 # Mirror the orich_cse_mini benchmark setup (fast: ~2 s integration)
 CSE_PARAMS = dict(
     mdot=1.0e-5,      # M_sun/yr
-    vexp=15.0,        # km/s
+    vexp=15.0e5,      # cm/s (= 15 km/s)
     t_star=2000.0,    # K
     r_init=1.0e16,    # cm
     r_star=5.0e13,    # cm
@@ -42,7 +42,7 @@ def cse_solution(tmp_path_factory):
         initial_abundances = yaml.safe_load(f)["abundances"]
 
     physics = CSEPhysics(**CSE_PARAMS)
-    v_cgs = CSE_PARAMS["vexp"] * 1.0e5
+    v_cgs = CSE_PARAMS["vexp"]  # already cm/s
     t_end_yr = (R_FINAL - CSE_PARAMS["r_init"]) / v_cgs / SPY
 
     initial_n, _, _, _ = physics.get_conditions(t_sec=0.0)

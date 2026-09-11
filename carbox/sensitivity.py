@@ -59,7 +59,6 @@ import pandas as pd
 
 from .config import SimulationConfig
 from .network import JNetwork, Network
-from .physics import KM_CM
 from .solver import SPY, get_time_grid, solve_network
 
 SnapshotIndex = Union[int, str]
@@ -141,9 +140,10 @@ def _apply_physics_multipliers(
 
     t_end = config.t_end
     if "vexp" in names:
-        # r_final is constant w.r.t. p: r_final = r_init + vexp * t_end.
+        # r_final is constant w.r.t. p: r_final = r_init + vexp_cgs * t_end_sec.
+        # vexp is already in cm/s (CSEPhysics convention).
         r_final = physics.r_init + physics.vexp * (config.t_end * SPY)
-        t_end = (r_final - physics.r_init) / (physics2.vexp * KM_CM) / SPY
+        t_end = (r_final - physics.r_init) / physics2.vexp / SPY
 
     return dataclasses.replace(config, physics_model=physics2, t_end=t_end)
 
